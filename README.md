@@ -1,13 +1,15 @@
 # Chatbot Agent
 
-A focused Next.js workspace for a conversational AI agent. The UI is ready for local development and the server route keeps model credentials off the client.
+A Python-first chatbot workspace built with Streamlit. The app keeps the conversation UI and agent logic in Python and uses an OpenAI-compatible chat completions endpoint.
 
 ## Run locally
 
-1. Install Node.js 20 or newer.
-2. Run `npm install`.
-3. Copy `.env.example` to `.env.local` and set `AI_API_KEY`.
-4. Run `npm run dev`.
-5. Open `http://localhost:3000`.
+1. Install Python 3.11 or newer.
+2. Create a virtual environment: `py -m venv .venv`.
+3. Activate it: `.\\.venv\\Scripts\\Activate.ps1`.
+4. Install dependencies: `python -m pip install -r requirements.txt`.
+5. Copy `.env.example` to `.env` and set `AI_API_KEY`.
+6. Start the app: `streamlit run app.py`.
+7. Open the local URL shown by Streamlit, usually `http://localhost:8501`.
 
-The agent uses an OpenAI-compatible chat completions endpoint. Set `AI_BASE_URL` and `AI_MODEL` to use another compatible provider.
+The agent uses an OpenAI-compatible endpoint. Set `AI_BASE_URL` and `AI_MODEL` to use another compatible provider.

@@ -1,8 +1,11 @@
+.venv/
 node_modules/
 .next/
-out/
+__pycache__/
+*.py[cod]
 .env*
 !.env.example
+.streamlit/secrets.toml
 
 # local OS files
 .DS_Store
