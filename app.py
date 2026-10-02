@@ -42,10 +42,21 @@ def read_school_sections() -> list[tuple[str, list[str]]]:
                 sections.append((title, content))
             title = heading.group(1)
             content = []
-        elif line.strip() and not re.search(r"\[[^]]*\]", line):
+        elif line.strip():
             clean_line = re.sub(r"^\s*[-*]\s*", "", line).strip()
-            if clean_line and not clean_line.lower().startswith(("source documents", "last reviewed")):
-                content.append(clean_line)
+            if not clean_line or clean_line.lower().startswith(("source documents", "last reviewed")):
+                continue
+
+            field, separator, value = clean_line.partition(":")
+            if separator and re.fullmatch(r"\[(?:add|add date)\]", value.strip(), flags=re.IGNORECASE):
+                continue
+
+            if separator and value.strip().startswith("[") and value.strip().endswith("]"):
+                clean_line = f"{field.strip()}: {value.strip()[1:-1].strip()}"
+            elif not separator and re.fullmatch(r"\[(?:add|add date)\]", clean_line, flags=re.IGNORECASE):
+                continue
+
+            content.append(clean_line)
     if content:
         sections.append((title, content))
     return sections
