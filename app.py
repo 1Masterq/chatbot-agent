@@ -1,43 +1,83 @@
 import csv
-import smtplib
-import json
-import os
 import re
-import ssl
-import urllib.error
-import urllib.request
 from datetime import datetime, timezone
-from email.message import EmailMessage
 from pathlib import Path
+from urllib.parse import urlencode
 
 import streamlit as st
-from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent
 SCHOOL_INFO_PATH = ROOT / "school_info.md"
 HANDOFF_PATH = ROOT / "data" / "handoff_requests.csv"
-
-load_dotenv(ROOT / ".env.local")
-load_dotenv(ROOT / ".env", override=False)
+STAFF_EMAIL = "ohagwuijat@gmail.com"
 
 st.set_page_config(page_title="Freshman help desk", page_icon=":material/school:", layout="centered")
 
-SYSTEM_PROMPT = """You are the school's friendly freshman help-desk assistant.
-Answer questions about school rules, courses, departments, HODs, offices, and student life using only the verified school information below.
-Do not invent or infer school-specific facts. If the information does not answer the question, reply with exactly [STAFF_FOLLOW_UP] followed by one brief sentence saying the information is not available and the student can ask a staff member.
-For greetings and ordinary conversation, respond naturally and briefly. Be respectful, welcoming, and easy for a new student to understand.
-Do not claim a staff request was sent unless the student submits the staff follow-up form.
-
-Verified school information:
-{school_info}
-"""
+STOP_WORDS = {
+    "a", "about", "am", "an", "and", "are", "can", "do", "does", "for", "how", "i",
+    "in", "is", "it", "me", "my", "of", "on", "or", "please", "school", "tell", "the",
+    "there", "to", "we", "what", "when", "where", "which", "who", "why", "you",
+}
 
 
-def read_school_info() -> str:
+def read_school_sections() -> list[tuple[str, list[str]]]:
     try:
-        return SCHOOL_INFO_PATH.read_text(encoding="utf-8").strip()
+        lines = SCHOOL_INFO_PATH.read_text(encoding="utf-8").splitlines()
     except OSError:
-        return "No verified school information has been added yet."
+        return []
+
+    sections: list[tuple[str, list[str]]] = []
+    title = "School information"
+    content: list[str] = []
+    for line in lines:
+        heading = re.match(r"^#{1,6}\s+(.+?)\s*$", line)
+        if heading:
+            if content:
+                sections.append((title, content))
+            title = heading.group(1)
+            content = []
+        elif line.strip() and not re.search(r"\[[^]]*\]", line):
+            clean_line = re.sub(r"^\s*[-*]\s*", "", line).strip()
+            if clean_line and not clean_line.lower().startswith(("source documents", "last reviewed")):
+                content.append(clean_line)
+    if content:
+        sections.append((title, content))
+    return sections
+
+
+def search_terms(text: str) -> set[str]:
+    return {
+        word.rstrip("s")
+        for word in re.findall(r"[a-z0-9]+", text.lower())
+        if word not in STOP_WORDS and len(word) > 1
+    }
+
+
+def search_school_info(question: str) -> str | None:
+    query_terms = search_terms(question)
+    if not query_terms:
+        return None
+
+    best_result: tuple[int, str] | None = None
+    for heading, lines in read_school_sections():
+        body = " ".join(lines)
+        body_terms = search_terms(body)
+        heading_terms = search_terms(heading)
+        overlap = query_terms & (body_terms | heading_terms)
+        if not overlap:
+            continue
+        score = 2 * len(query_terms & body_terms) + len(query_terms & heading_terms)
+        answer = "\n".join(lines)
+        if best_result is None or score > best_result[0]:
+            best_result = (score, f"**{heading}**\n\n{answer}")
+
+    return best_result[1] if best_result else None
+
+
+def staff_email_link(email: str, question: str) -> str:
+    body = f"Question: {question.strip()}\n\nReply email: {email.strip() or 'Not provided'}"
+    query = urlencode({"subject": "Freshman help-desk question", "body": body})
+    return f"mailto:{STAFF_EMAIL}?{query}"
 
 
 def greeting_reply(message: str) -> str | None:
@@ -74,35 +114,10 @@ def ask_agent(messages: list[dict[str, str]]) -> str:
     local_greeting = greeting_reply(latest_user_message)
     if local_greeting:
         return local_greeting
-
-    api_key = os.getenv("AI_API_KEY")
-    if not api_key or api_key.strip() in {"your_real_api_key", "your_api_key_here"}:
-        return "I can greet you, but the AI connection is not configured yet. Add AI_API_KEY to .env.local to ask school questions."
-
-    base_url = os.getenv("AI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-    model = os.getenv("AI_MODEL", "gpt-4o-mini")
-    payload = json.dumps({
-        "model": model,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT.format(school_info=read_school_info())},
-            *messages,
-        ],
-    }).encode("utf-8")
-    request = urllib.request.Request(
-        f"{base_url}/chat/completions",
-        data=payload,
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
-        method="POST",
-    )
-
-    try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            result = json.loads(response.read().decode("utf-8"))
-        return result["choices"][0]["message"]["content"]
-    except urllib.error.HTTPError as error:
-        return provider_error_message(error)
-    except (urllib.error.URLError, KeyError, IndexError, json.JSONDecodeError):
-        return "I couldn't reach the AI provider. Please try again or submit a staff follow-up request."
+    answer = search_school_info(latest_user_message)
+    if answer:
+        return answer
+    return "I couldn't find a verified answer in the school information yet. I'll prepare this question for staff follow-up."
 
 
 def save_handoff(email: str, question: str) -> None:
@@ -119,39 +134,11 @@ def save_handoff(email: str, question: str) -> None:
         })
 
 
-def email_staff(email: str, question: str) -> str:
-    staff_email = os.getenv("STAFF_EMAIL", "").strip()
-    smtp_host = os.getenv("SMTP_HOST", "").strip()
-    smtp_username = os.getenv("SMTP_USERNAME", "").strip()
-    smtp_password = os.getenv("SMTP_PASSWORD", "")
-    if not all((staff_email, smtp_host, smtp_username, smtp_password)):
-        return "not_configured"
-
-    message = EmailMessage()
-    message["Subject"] = "Freshman help-desk follow-up"
-    message["From"] = os.getenv("SMTP_FROM", "").strip() or smtp_username
-    message["To"] = staff_email
-    message.set_content(
-        f"A freshman submitted a question for staff follow-up.\n\n"
-        f"Question:\n{question.strip()}\n\n"
-        f"Reply email: {email.strip() or 'Not provided'}\n"
-    )
-
-    try:
-        with smtplib.SMTP(smtp_host, int(os.getenv("SMTP_PORT", "587")), timeout=20) as server:
-            server.starttls(context=ssl.create_default_context())
-            server.login(smtp_username, smtp_password)
-            server.send_message(message)
-    except (OSError, ValueError, smtplib.SMTPException):
-        return "failed"
-    return "sent"
-
-
 st.title("Freshman help desk")
-st.write("Welcome to campus. Ask about school rules, courses, departments, HODs, or settling in.")
+st.write("Welcome to campus. Search verified school information about rules, courses, departments, HODs, and settling in.")
 
 with st.expander("What I can help with"):
-    st.write("I answer from the school's approved information. If I can't verify an answer, I will say so and you can leave a question for a staff member.")
+    st.write("I search the school's approved information on this computer. I don't use a paid AI API or make up school facts. If I can't find an answer, you can email staff.")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -168,16 +155,14 @@ if prompt:
     with st.chat_message("assistant"):
         with st.spinner("Checking..." if greeting_reply(prompt) is None else ""):
             answer = ask_agent(st.session_state.messages)
-        if answer.startswith("[STAFF_FOLLOW_UP]"):
-            answer = answer.removeprefix("[STAFF_FOLLOW_UP]").strip()
+        if answer.startswith("I couldn't find a verified answer"):
             st.session_state.pending_question = prompt
         st.write(answer)
     st.session_state.messages.append({"role": "assistant", "content": answer})
 
 with st.sidebar:
     st.header("Ask a staff member")
-    st.write("Use this when you need a person to follow up, or when the assistant does not know the answer.")
-    st.caption("This saves the request locally. It emails staff only after the school's approved sender settings are configured.")
+    st.write("Send an unanswered question to staff using your own email app.")
     with st.form("staff_follow_up"):
         question = st.text_area(
             "Your question",
@@ -185,8 +170,8 @@ with st.sidebar:
             placeholder="What would you like a staff member to answer?",
         )
         email = st.text_input("Email for a reply (optional)")
-        consent = st.checkbox("I agree to send this question and my optional email to school staff.")
-        submitted = st.form_submit_button("Submit question", type="primary")
+        consent = st.checkbox("I agree to include this question and my optional email in an email to staff.")
+        submitted = st.form_submit_button("Prepare email", type="primary")
     if submitted:
         if not question.strip():
             st.error("Please enter your question first.")
@@ -195,13 +180,10 @@ with st.sidebar:
         else:
             save_handoff(email, question)
             st.session_state.pending_question = ""
-            delivery = email_staff(email, question)
-            if delivery == "sent":
-                st.success("Your request was saved and emailed to school staff.")
-            elif delivery == "failed":
-                st.error("Your request was saved on this computer, but the staff email could not be sent. Please contact the school directly.")
-            else:
-                st.warning("Your request was saved on this computer only. Staff email delivery is not configured yet.")
-    st.caption("Only submit information you are comfortable sharing with school staff. Requests are saved locally; email is sent only when the school configures an approved sender.")
+            st.session_state.staff_mailto = staff_email_link(email, question)
+            st.success("The question was saved locally. Select below to open a prefilled email, then press Send in your email app.")
+    if st.session_state.get("staff_mailto"):
+        st.link_button("Open prefilled email", st.session_state.staff_mailto, icon=":material/mail:")
+    st.caption("Email opens in the student's email app and is not sent until they press Send. Requests are also saved locally on this computer.")
 
 st.caption("Do not share passwords or other sensitive personal information in chat.")
