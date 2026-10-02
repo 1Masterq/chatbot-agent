@@ -1,10 +1,13 @@
 import csv
+import smtplib
 import json
 import os
 import re
+import ssl
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
+from email.message import EmailMessage
 from pathlib import Path
 
 import streamlit as st
@@ -44,6 +47,28 @@ def greeting_reply(message: str) -> str | None:
     return None
 
 
+def provider_error_message(error: urllib.error.HTTPError) -> str:
+    try:
+        details = json.loads(error.read().decode("utf-8")).get("error", {})
+    except (AttributeError, UnicodeDecodeError, json.JSONDecodeError):
+        details = {}
+
+    code = details.get("code")
+    if code in {"credit_balance_exhausted", "insufficient_quota"}:
+        return "The AI account has no API credits available. The account owner needs to add API billing or credits."
+    if error.code == 429:
+        return "The AI account has reached its usage limit. Check the provider's billing and rate limits."
+    if error.code in {401, 403}:
+        return "The AI provider rejected this key or its permissions. Check the provider account and API key."
+    if error.code == 404:
+        return "The configured AI model or API endpoint was not found. Check AI_MODEL and AI_BASE_URL."
+    if error.code == 400:
+        return "The AI provider rejected the request settings. Check AI_MODEL and the provider configuration."
+    if error.code >= 500:
+        return "The AI provider is having a temporary service problem. Please try again later."
+    return "The AI provider could not complete this request. Please check its account and configuration."
+
+
 def ask_agent(messages: list[dict[str, str]]) -> str:
     latest_user_message = next((message["content"] for message in reversed(messages) if message["role"] == "user"), "")
     local_greeting = greeting_reply(latest_user_message)
@@ -75,9 +100,7 @@ def ask_agent(messages: list[dict[str, str]]) -> str:
             result = json.loads(response.read().decode("utf-8"))
         return result["choices"][0]["message"]["content"]
     except urllib.error.HTTPError as error:
-        if error.code in {401, 403}:
-            return "The AI provider rejected the API key. Check AI_API_KEY in .env.local."
-        return "The AI provider is temporarily unavailable. Please try again or submit a staff follow-up request."
+        return provider_error_message(error)
     except (urllib.error.URLError, KeyError, IndexError, json.JSONDecodeError):
         return "I couldn't reach the AI provider. Please try again or submit a staff follow-up request."
 
@@ -94,6 +117,34 @@ def save_handoff(email: str, question: str) -> None:
             "email": email.strip(),
             "question": question.strip(),
         })
+
+
+def email_staff(email: str, question: str) -> str:
+    staff_email = os.getenv("STAFF_EMAIL", "").strip()
+    smtp_host = os.getenv("SMTP_HOST", "").strip()
+    smtp_username = os.getenv("SMTP_USERNAME", "").strip()
+    smtp_password = os.getenv("SMTP_PASSWORD", "")
+    if not all((staff_email, smtp_host, smtp_username, smtp_password)):
+        return "not_configured"
+
+    message = EmailMessage()
+    message["Subject"] = "Freshman help-desk follow-up"
+    message["From"] = os.getenv("SMTP_FROM", "").strip() or smtp_username
+    message["To"] = staff_email
+    message.set_content(
+        f"A freshman submitted a question for staff follow-up.\n\n"
+        f"Question:\n{question.strip()}\n\n"
+        f"Reply email: {email.strip() or 'Not provided'}\n"
+    )
+
+    try:
+        with smtplib.SMTP(smtp_host, int(os.getenv("SMTP_PORT", "587")), timeout=20) as server:
+            server.starttls(context=ssl.create_default_context())
+            server.login(smtp_username, smtp_password)
+            server.send_message(message)
+    except (OSError, ValueError, smtplib.SMTPException):
+        return "failed"
+    return "sent"
 
 
 st.title("Freshman help desk")
@@ -126,6 +177,7 @@ if prompt:
 with st.sidebar:
     st.header("Ask a staff member")
     st.write("Use this when you need a person to follow up, or when the assistant does not know the answer.")
+    st.caption("This saves the request locally. It emails staff only after the school's approved sender settings are configured.")
     with st.form("staff_follow_up"):
         question = st.text_area(
             "Your question",
@@ -133,14 +185,23 @@ with st.sidebar:
             placeholder="What would you like a staff member to answer?",
         )
         email = st.text_input("Email for a reply (optional)")
-        submitted = st.form_submit_button("Save follow-up request", type="primary")
+        consent = st.checkbox("I agree to send this question and my optional email to school staff.")
+        submitted = st.form_submit_button("Submit question", type="primary")
     if submitted:
         if not question.strip():
             st.error("Please enter your question first.")
+        elif not consent:
+            st.error("Please confirm before submitting your question to school staff.")
         else:
             save_handoff(email, question)
             st.session_state.pending_question = ""
-            st.success("Your request was saved for staff follow-up.")
-    st.caption("Prototype notice: requests are saved on this computer only. They are not emailed or sent to school staff yet.")
+            delivery = email_staff(email, question)
+            if delivery == "sent":
+                st.success("Your request was saved and emailed to school staff.")
+            elif delivery == "failed":
+                st.error("Your request was saved on this computer, but the staff email could not be sent. Please contact the school directly.")
+            else:
+                st.warning("Your request was saved on this computer only. Staff email delivery is not configured yet.")
+    st.caption("Only submit information you are comfortable sharing with school staff. Requests are saved locally; email is sent only when the school configures an approved sender.")
 
 st.caption("Do not share passwords or other sensitive personal information in chat.")
