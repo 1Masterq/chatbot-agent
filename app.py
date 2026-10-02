@@ -1,15 +1,21 @@
 import csv
+import os
 import re
+import smtplib
+import ssl
 from datetime import datetime, timezone
+from email.message import EmailMessage
 from pathlib import Path
-from urllib.parse import urlencode
 
 import streamlit as st
+from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent
 SCHOOL_INFO_PATH = ROOT / "school_info.md"
 HANDOFF_PATH = ROOT / "data" / "handoff_requests.csv"
-STAFF_EMAIL = "ohagwuijat@gmail.com"
+
+load_dotenv(ROOT / ".env.local")
+load_dotenv(ROOT / ".env", override=False)
 
 st.set_page_config(page_title="Freshman help desk", page_icon=":material/school:", layout="centered")
 
@@ -74,39 +80,11 @@ def search_school_info(question: str) -> str | None:
     return best_result[1] if best_result else None
 
 
-def staff_email_link(email: str, question: str) -> str:
-    body = f"Question: {question.strip()}\n\nReply email: {email.strip() or 'Not provided'}"
-    query = urlencode({"subject": "Freshman help-desk question", "body": body})
-    return f"mailto:{STAFF_EMAIL}?{query}"
-
-
 def greeting_reply(message: str) -> str | None:
     normalized = re.sub(r"[^a-z ]", "", message.lower()).strip()
     if normalized in {"hi", "hello", "hey", "good morning", "good afternoon", "good evening"}:
         return "Hey! Welcome. I can help with school rules, courses, departments, HODs, and other freshman questions. What would you like to know?"
     return None
-
-
-def provider_error_message(error: urllib.error.HTTPError) -> str:
-    try:
-        details = json.loads(error.read().decode("utf-8")).get("error", {})
-    except (AttributeError, UnicodeDecodeError, json.JSONDecodeError):
-        details = {}
-
-    code = details.get("code")
-    if code in {"credit_balance_exhausted", "insufficient_quota"}:
-        return "The AI account has no API credits available. The account owner needs to add API billing or credits."
-    if error.code == 429:
-        return "The AI account has reached its usage limit. Check the provider's billing and rate limits."
-    if error.code in {401, 403}:
-        return "The AI provider rejected this key or its permissions. Check the provider account and API key."
-    if error.code == 404:
-        return "The configured AI model or API endpoint was not found. Check AI_MODEL and AI_BASE_URL."
-    if error.code == 400:
-        return "The AI provider rejected the request settings. Check AI_MODEL and the provider configuration."
-    if error.code >= 500:
-        return "The AI provider is having a temporary service problem. Please try again later."
-    return "The AI provider could not complete this request. Please check its account and configuration."
 
 
 def ask_agent(messages: list[dict[str, str]]) -> str:
@@ -132,6 +110,37 @@ def save_handoff(email: str, question: str) -> None:
             "email": email.strip(),
             "question": question.strip(),
         })
+
+
+def email_staff(email: str, question: str) -> str:
+    staff_email = os.getenv("STAFF_EMAIL", "").strip()
+    smtp_host = os.getenv("SMTP_HOST", "").strip()
+    smtp_username = os.getenv("SMTP_USERNAME", "").strip()
+    smtp_password = os.getenv("SMTP_PASSWORD", "")
+    if not all((staff_email, smtp_host, smtp_username, smtp_password)):
+        return "not_configured"
+
+    message = EmailMessage()
+    message["Subject"] = "Freshman help-desk question"
+    message["From"] = os.getenv("SMTP_FROM", "").strip() or smtp_username
+    message["To"] = staff_email
+    if email.strip():
+        message["Reply-To"] = email.strip()
+    message.set_content(
+        "A freshman submitted a question for staff follow-up.\n\n"
+        f"Question:\n{question.strip()}\n\n"
+        f"Student reply email: {email.strip() or 'Not provided'}\n"
+    )
+
+    try:
+        port = int(os.getenv("SMTP_PORT", "587"))
+        with smtplib.SMTP(smtp_host, port, timeout=20) as server:
+            server.starttls(context=ssl.create_default_context())
+            server.login(smtp_username, smtp_password)
+            server.send_message(message)
+    except (OSError, ValueError, smtplib.SMTPException):
+        return "failed"
+    return "sent"
 
 
 st.title("Freshman help desk")
@@ -162,7 +171,7 @@ if prompt:
 
 with st.sidebar:
     st.header("Ask a staff member")
-    st.write("Send an unanswered question to staff using your own email app.")
+    st.write("Send an unanswered question directly to the freshman support inbox.")
     with st.form("staff_follow_up"):
         question = st.text_area(
             "Your question",
@@ -171,7 +180,7 @@ with st.sidebar:
         )
         email = st.text_input("Email for a reply (optional)")
         consent = st.checkbox("I agree to include this question and my optional email in an email to staff.")
-        submitted = st.form_submit_button("Prepare email", type="primary")
+        submitted = st.form_submit_button("Send to staff", type="primary")
     if submitted:
         if not question.strip():
             st.error("Please enter your question first.")
@@ -180,10 +189,13 @@ with st.sidebar:
         else:
             save_handoff(email, question)
             st.session_state.pending_question = ""
-            st.session_state.staff_mailto = staff_email_link(email, question)
-            st.success("The question was saved locally. Select below to open a prefilled email, then press Send in your email app.")
-    if st.session_state.get("staff_mailto"):
-        st.link_button("Open prefilled email", st.session_state.staff_mailto, icon=":material/mail:")
-    st.caption("Email opens in the student's email app and is not sent until they press Send. Requests are also saved locally on this computer.")
+            delivery = email_staff(email, question)
+            if delivery == "sent":
+                st.success("Your email was sent. We aim to review your question within 48 hours.")
+            elif delivery == "failed":
+                st.error("We couldn't send your email. Your question was saved on this computer; please contact the school directly.")
+            else:
+                st.warning("Email delivery isn't configured yet. Your question was saved on this computer, but staff have not received it.")
+    st.caption("Your question and optional reply email are emailed to staff only after you agree and press Send to staff. Do not include passwords or sensitive personal information.")
 
 st.caption("Do not share passwords or other sensitive personal information in chat.")
