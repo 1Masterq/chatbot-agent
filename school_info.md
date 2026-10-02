@@ -3,9 +3,9 @@
 Replace every bracketed placeholder with information confirmed by the school. Remove sections that do not apply. The chatbot must not guess missing details.
 
 ## School identity
-- Official school name: [add]
-- Campus/location: [add]
-- Official website: [add]
+- Official school name: [Fedral university wukari (FUW)]
+- Campus/location: [wukari, Taraba state, Nigeria.]
+- Official website: [https://www.fuw.edu.ng]
 
 ## Freshman do's and don'ts
 - Do: [add approved guidance]
@@ -22,8 +22,8 @@ Replace every bracketed placeholder with information confirmed by the school. Re
 - Academic advising contact: [add]
 
 ## Departments and HODs
-- Department: [add]
-- Head of Department (HOD): [add]
+- Department: [Software Engineering]
+- Head of Department (HOD): [PROF. Dr. Hambali]
 - Department contact/office: [add]
 
 ## Student services and campus life
