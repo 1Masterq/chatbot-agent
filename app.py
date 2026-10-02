@@ -51,7 +51,7 @@ def ask_agent(messages: list[dict[str, str]]) -> str:
         return local_greeting
 
     api_key = os.getenv("AI_API_KEY")
-    if not api_key or api_key == "your_real_api_key":
+    if not api_key or api_key.strip() in {"your_real_api_key", "your_api_key_here"}:
         return "I can greet you, but the AI connection is not configured yet. Add AI_API_KEY to .env.local to ask school questions."
 
     base_url = os.getenv("AI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
