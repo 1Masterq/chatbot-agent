@@ -77,18 +77,33 @@ def search_school_info(question: str) -> str | None:
 
     best_result: tuple[int, str] | None = None
     for heading, lines in read_school_sections():
-        body = " ".join(lines)
-        body_terms = search_terms(body)
         heading_terms = search_terms(heading)
-        overlap = query_terms & (body_terms | heading_terms)
-        if not overlap:
-            continue
-        score = 2 * len(query_terms & body_terms) + len(query_terms & heading_terms)
-        answer = "\n".join(lines)
-        if best_result is None or score > best_result[0]:
-            best_result = (score, f"**{heading}**\n\n{answer}")
+        for line in lines:
+            label, separator, value = line.partition(":")
+            if not separator:
+                label, value = heading, line
 
-    return best_result[1] if best_result else None
+            label_terms = search_terms(label)
+            value_terms = search_terms(value)
+            score = (
+                4 * len(query_terms & label_terms)
+                + 2 * len(query_terms & heading_terms)
+                + len(query_terms & value_terms)
+            )
+
+            asks_for_name = bool(query_terms & {"name", "call", "called"})
+            asks_for_department = bool(query_terms & {"department", "dept"})
+            asks_for_hod = bool(query_terms & {"hod", "head"})
+            if asks_for_name and asks_for_department and not asks_for_hod:
+                if label.strip().lower() == "department":
+                    score += 20
+                elif "department" in label_terms:
+                    score -= 4
+
+            if score > 0 and (best_result is None or score > best_result[0]):
+                best_result = (score, value.strip())
+
+    return f"**{best_result[1]}**" if best_result else None
 
 
 def greeting_reply(message: str) -> str | None:
