@@ -78,10 +78,24 @@ def search_school_info(question: str) -> str | None:
     best_result: tuple[int, str] | None = None
     for heading, lines in read_school_sections():
         heading_terms = search_terms(heading)
-        for line in lines:
+        for index, line in enumerate(lines):
             label, separator, value = line.partition(":")
             if not separator:
                 label, value = heading, line
+
+            if label.strip().lower() == "question" and index + 1 < len(lines):
+                answer_label, answer_separator, answer_value = lines[index + 1].partition(":")
+                if answer_separator and answer_label.strip().lower() == "answer":
+                    faq_terms = search_terms(value)
+                    score = 5 * len(query_terms & faq_terms) + len(query_terms & heading_terms)
+                    if score > 0 and (best_result is None or score > best_result[0]):
+                        best_result = (score, answer_value.strip())
+                    continue
+
+            if label.strip().lower() == "answer" and index > 0:
+                previous_label = lines[index - 1].partition(":")[0]
+                if previous_label.strip().lower() == "question":
+                    continue
 
             label_terms = search_terms(label)
             value_terms = search_terms(value)
