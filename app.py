@@ -68,6 +68,8 @@ def search_terms(text: str) -> set[str]:
         for word in re.findall(r"[a-z0-9]+", text.lower())
         if word not in STOP_WORDS and len(word) > 1
     }
+
+
 def search_school_info(question: str) -> str | None:
     query_terms = search_terms(question)
     if not query_terms:
