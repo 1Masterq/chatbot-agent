@@ -111,9 +111,9 @@ asks_for_department = bool(query_terms & {"department", "dept"})
 asks_for_hod = bool(query_terms & {"hod", "head"})
 
 if asks_for_name and asks_for_department and not asks_for_hod:
-    if label.strip().lower() == "department":
+if label.strip().lower() == "department":
         score += 20
-    elif "department" in label_terms:
+elif "department" in label_terms:
         score -= 4
 
 # Extra safeguard for vague "name" searches
