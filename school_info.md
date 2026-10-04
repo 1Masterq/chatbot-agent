@@ -17,7 +17,7 @@ Replace every bracketed placeholder with information confirmed by the school. Re
 ## Courses and registration
 - Courses/programmes offered: [Software Enginerring.]
 - Course or programme descriptions: [B.sc. Software enginerring.(4 years)]
-- Admission/course requirements: [Contact your lrvrl advicer.]
+- Admission/course requirements: [Contact your level advicer.]
 - Registration steps and deadlines: [For registration, files are to be openned in the deperment, facult, studient and academic affairs.]
 - Academic advising contact: [Level advicer Unknown.]
 
@@ -29,7 +29,7 @@ Replace every bracketed placeholder with information confirmed by the school. Re
 ## Student services and campus life
 - Admissions/registrar office: [Visit the hardware lab]
 - Student affairs: [Opposite the school clinic.]
-- Library: [Befor the hardware lab]
+- Library: [Before the hardware lab]
 - Health, safety, and emergency contacts: [add]
 - Housing/transport/food (if applicable): [add]
 
