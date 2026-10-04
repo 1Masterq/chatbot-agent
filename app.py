@@ -69,7 +69,6 @@ def search_terms(text: str) -> set[str]:
         if word not in STOP_WORDS and len(word) > 1
     }
 
-
 def search_school_info(question: str) -> str | None:
     query_terms = search_terms(question)
     if not query_terms:
@@ -83,11 +82,12 @@ def search_school_info(question: str) -> str | None:
             if not separator:
                 label, value = heading, line
 
+            # Handle FAQ questions/answers
             if label.strip().lower() == "question" and index + 1 < len(lines):
                 answer_label, answer_separator, answer_value = lines[index + 1].partition(":")
                 if answer_separator and answer_label.strip().lower() == "answer":
                     faq_terms = search_terms(value)
-                    score = 5 * len(query_terms & faq_terms) + len(query_terms & heading_terms)
+                    score = 6 * len(query_terms & faq_terms) + len(query_terms & heading_terms)
                     if score > 0 and (best_result is None or score > best_result[0]):
                         best_result = (score, answer_value.strip())
                     continue
@@ -99,20 +99,30 @@ def search_school_info(question: str) -> str | None:
 
             label_terms = search_terms(label)
             value_terms = search_terms(value)
+
+            # Reduce the impact of generic field names like "name", "department"
             score = (
-                4 * len(query_terms & label_terms)
-                + 2 * len(query_terms & heading_terms)
-                + len(query_terms & value_terms)
+                2 * len(query_terms & label_terms)
+                + 3 * len(query_terms & heading_terms)
+                + 3 * len(query_terms & value_terms)
             )
 
             asks_for_name = bool(query_terms & {"name", "call", "called"})
             asks_for_department = bool(query_terms & {"department", "dept"})
             asks_for_hod = bool(query_terms & {"hod", "head"})
+
             if asks_for_name and asks_for_department and not asks_for_hod:
                 if label.strip().lower() == "department":
                     score += 20
                 elif "department" in label_terms:
                     score -= 4
+
+            # Extra safeguard: don't let very generic "name" questions match school identity too easily
+            if asks_for_name and not asks_for_department and not asks_for_hod:
+                if label.strip().lower() in {"official school name", "school identity"}:
+                    score -= 5
+                elif label.strip().lower() in {"head of department (hod)", "department contact/office"}:
+                    score += 8
 
             if score > 0 and (best_result is None or score > best_result[0]):
                 best_result = (score, value.strip())
